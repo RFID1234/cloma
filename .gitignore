@@ -1,0 +1,46 @@
+# Node dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+build/
+.next/
+.vercel/
+out/
+.tmp/
+temp/
+
+# Local environment
+.env
+.env.local
+.env.development
+.env.production
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# Editor folders
+.vscode/
+.idea/
+
+# Coverage / test
+coverage/
+*.lcov
+*.coverage
+
+# Misc
+*.tgz
+*.zip
