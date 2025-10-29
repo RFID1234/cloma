@@ -6,8 +6,18 @@
     ],
     "routes": [
       { "src": "/api/(.*)", "dest": "/api/$1" },
+      { "src": "/assets/(.*)", "dest": "/assets/$1" },
+      { "src": "/scripts/(.*)", "dest": "/scripts/$1" },
+      { "src": "/content/(.*)", "dest": "/content/$1" },
+      { "src": "/fonts/(.*)", "dest": "/fonts/$1" },
+      { "src": "/data/(.*)", "dest": "/data/$1" },
+  
+      {
+        "src": "/(.*\\.(?:js|css|png|jpg|jpeg|svg|ico|webp|woff2|woff|ttf|json))$",
+        "dest": "/$1"
+      },
+
       { "src": "/(.*)", "dest": "/index.html" }
-    ],
-    "outputDirectory": "."
+    ]
   }
   
