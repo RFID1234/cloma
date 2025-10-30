@@ -5,6 +5,18 @@ const fs = require('fs');
 
 const app = express();
 app.use(express.json());
+// === serve static assets explicitly so image/favicon requests return files ===
+app.use('/assets', express.static(path.join(ROOT, 'assets')));
+app.use('/content', express.static(path.join(ROOT, 'content')));
+app.use('/scripts', express.static(path.join(ROOT, 'scripts')));
+
+// optional: explicit favicon route (safe)
+app.get('/favicon.ico', (req, res) => {
+  const ico = path.join(ROOT, 'assets', 'img', 'favicon.ico');
+  if (fs.existsSync(ico)) return res.sendFile(ico);
+  res.status(404).end();
+});
+
 
 const ROOT = path.join(__dirname);
 const DATA_DIR = path.join(ROOT, 'data');
@@ -71,13 +83,21 @@ app.get('/api/product/:code', (req, res) => {
 });
 
 // For SPA pretty routing, deliver index.html for unknown static paths
+// For SPA pretty routing, deliver index.html for unknown static paths
 app.get('*', (req, res) => {
-  const requested = path.join(ROOT, req.path);
-  if (fs.existsSync(requested) && fs.statSync(requested).isFile()) {
-    return res.sendFile(requested);
-  }
-  res.sendFile(path.join(ROOT, 'index.html'));
-});
+    // map requested path *within* project root (prevent absolute path override)
+    const rel = req.path.replace(/^\/+/, ''); // remove leading '/'
+    const requested = path.join(ROOT, rel);
+  
+    // if the file physically exists under project root, serve it directly
+    if (fs.existsSync(requested) && fs.statSync(requested).isFile()) {
+      return res.sendFile(requested);
+    }
+  
+    // otherwise send index (SPA fallback)
+    res.sendFile(path.join(ROOT, 'index.html'));
+  });
+  
 
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => console.log(`Local clone server listening at http://localhost:${port}`));
