@@ -90,6 +90,25 @@
       else resp.innerHTML = buildAuthenticHTML(json.code || json.c || '', json.guillocheUrl);
       resp.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
+
+    async function callVerify(code) {
+        try {
+          const res = await fetch('/api/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code })
+          });
+          if (!res.ok) {
+            console.error('verify call failed', res.status, await res.text());
+            return null;
+          }
+          return await res.json();
+        } catch (e) {
+          console.error('verify error', e);
+          return null;
+        }
+      }
+      
   
     // Initialize: set code from query, but don't attach any handlers (main bundle manages events)
     function init() {
