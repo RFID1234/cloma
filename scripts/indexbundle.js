@@ -204,13 +204,32 @@
           $("#Code").focus()
       });
       $("#btnReportLink").click(function() {
-          $("#contactformarea").fadeIn(fadeTime, function() {
-              $("html, body").animate({
-                  scrollTop: parseInt($("#section_contact").offset().top) - 80
-              }, fadeTime);
-              bindContactForm();
-              $("#reportLink").hide()
-          })
+          // before showing contact form, lazy-load hCaptcha (non-blocking)
+if (typeof window.ensureHcaptcha === 'function') {
+    window.ensureHcaptcha().then(() => {
+      // hCaptcha loaded and rendered
+      $("#contactformarea").fadeIn(fadeTime, function() {
+        $("html, body").animate({ scrollTop: parseInt($("#section_contact").offset().top) - 80 }, fadeTime);
+        bindContactForm();
+        $("#reportLink").hide();
+      });
+    }).catch(() => {
+      // if hCaptcha fails to load, still show form (do not block user)
+      $("#contactformarea").fadeIn(fadeTime, function() {
+        $("html, body").animate({ scrollTop: parseInt($("#section_contact").offset().top) - 80 }, fadeTime);
+        bindContactForm();
+        $("#reportLink").hide();
+      });
+    });
+  } else {
+    // fallback: show form immediately
+    $("#contactformarea").fadeIn(fadeTime, function() {
+      $("html, body").animate({ scrollTop: parseInt($("#section_contact").offset().top) - 80 }, fadeTime);
+      bindContactForm();
+      $("#reportLink").hide();
+    });
+  }
+  
       });
       $(".validcontainer").length && ($(".sharethis-inline-share-buttons").length && addSharingFunction(),
       typeof runMarketing == "function" && runMarketing());

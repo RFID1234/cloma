@@ -177,6 +177,53 @@
     </style>
     <script src="/scripts/sitebundle.js" type="text/javascript"></script>
 </head>
+<script>
+    // Lazy-load + explicit render for hCaptcha (prevents automatic iframe / blob)
+    (function() {
+      const SITEKEY = document.querySelector('#hcaptcha-container')?.dataset.sitekey;
+      let loaded = false;
+      let renderId = null;
+  
+      function loadScript() {
+        return new Promise((resolve, reject) => {
+          if (loaded) return resolve();
+          const s = document.createElement('script');
+          // use explicit mode and onload callback name
+          s.src = 'https://js.hcaptcha.com/1/api.js?onload=__hcaptchaOnLoad&render=explicit';
+          s.async = true;
+          s.defer = true;
+          window.__hcaptchaOnLoad = function() {
+            loaded = true;
+            resolve();
+          };
+          s.onerror = function(e) { reject(e); };
+          document.head.appendChild(s);
+        });
+      }
+  
+      async function ensureHcaptcha() {
+        if (!SITEKEY) return;
+        await loadScript();
+        // if already rendered, nothing to do
+        if (renderId !== null) return renderId;
+        try {
+          // render inside #hcaptcha-container
+          renderId = window.hcaptcha.render('hcaptcha-container', {
+            sitekey: SITEKEY,
+            size: 'compact'
+          });
+          return renderId;
+        } catch (err) {
+          console.error('hcaptcha render error', err);
+          return null;
+        }
+      }
+  
+      // Expose helper so other scripts (contact.js) can call it
+      window.ensureHcaptcha = ensureHcaptcha;
+    })();
+  </script>
+  
 <body data-spy="scroll" data-target="#navbar_main" data-offset="80">
     <div class="preloader">
             <img src="/assets/img/spinner.svg" alt="Loading..." class="preloader__spinner">
@@ -350,7 +397,9 @@ SUBMIT                                    </button>
                                                 <input class="form-control" data-val="true" data-val-email="Email is not valid" data-val-length="The field Email Address must be a string with a maximum length of 255." data-val-length-max="255" id="CustomerEmail" maxlength="255" name="CustomerEmail" type="text" value="" />
                                                 <span class="help-block field-validation-valid" data-valmsg-for="CustomerEmail" data-valmsg-replace="true"></span>
                                             </div>
-                                    <div class="h-captcha" data-sitekey="d21a4c68-7a60-4820-ab1a-4f582906ad14" data-size="compact"></div>
+                                    <!-- hCaptcha placeholder — will be rendered explicitly only when needed -->
+                                    <div id="hcaptcha-container" data-sitekey="d21a4c68-7a60-4820-ab1a-4f582906ad14" style="min-height:72px"></div>
+
                                     <span class="help-block field-validation-error" id="captchaError" style="display:none">
                                         <span>This information is required. Please provide.</span>
                                     </span>
@@ -443,7 +492,6 @@ SUBMIT                                    </button>
     </footer>
         <script src="/scripts/contact.js" type="text/javascript"></script>
         <script defer src="/scripts\locales\datepicker.js" type="text/javascript"></script>
-        <script type='text/javascript' src="https://js.hcaptcha.com/1/api.js" defer></script>
     
     <script type="text/javascript">
 
