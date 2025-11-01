@@ -36,40 +36,20 @@
         }
     }
     
-    function bindContactForm() {
-        // UI-only contact: do NOT send network request in production (serverless requirement)
-        $("#contactFormSuccess").hide();
-        $("#contactFormContainer").show();
-      
-        // Prevent native form submission so it never posts to /CL669/SendMoreInfo
-        // but DO NOT `return false` — that breaks button click behaviour in some browsers.
-        $("#contactForm").off('submit').on('submit', function(e) {
-          e.preventDefault();
-        });
-      
-        var n = getCultureForDatepicker();
-        try {
-          $("#PurchaseDate").datepicker({ language: n, autoclose: true, format: 'mm/dd/yyyy' });
-        } catch (ex) {
-          console.warn('datepicker init failed', ex);
+    f$("#btnSubmitContact").off('click').on('click', function(e) {
+        e.preventDefault();
+        // optional: validate client-side before showing the success UI
+        if ($("#contactForm").valid && $("#contactForm").valid()) {
+            $("#contactFormContainer").hide();
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").fadeIn();
+        } else {
+            $("#contactFormContainer").hide();
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").fadeIn();
         }
+      });
       
-        // Ensure the submit button is a non-submitting button and attach the UI-only handler
-        $("#btnSubmitContact").attr('type', 'button').off('click').on('click', function(e) {
-          e.preventDefault();
-          var valid = true;
-          try {
-            valid = ($("#contactForm").valid && $("#contactForm").valid()) ? true : false;
-          } catch (ex) {
-            valid = true; // if validation plugin missing, still show success UI
-          }
-      
-          // Show success UI in every case (keeps original behaviour)
-          $("#contactFormContainer").hide();
-          $("#contactFormFailure").hide();
-          $("#contactFormSuccess").fadeIn();
-        });
-      }
       
     function bindCarousels() {
       var n = $(".gfecarousel");
