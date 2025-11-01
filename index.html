@@ -509,8 +509,71 @@ SUBMIT                                    </button>
         var language = '';
         var codepresent = true;
     </script>
+
+<script>
+    (function(){
+      // Init datepicker if plugin is present and #PurchaseDate exists
+      function initPurchaseDate() {
+        try {
+          if (window.jQuery && typeof jQuery.fn.datepicker === 'function') {
+            var culture = (navigator.language || 'en');
+            var lang = (culture === 'en-US' || culture === 'en') ? '' : (culture.startsWith('es-') ? 'es' : (culture.startsWith('zh-') ? 'zh' : ''));
+            $('#PurchaseDate').datepicker && $('#PurchaseDate').datepicker({ language: lang, autoclose: true, format: 'mm/dd/yyyy' });
+          }
+        } catch (e) { console.warn('datepicker init failed', e); }
+      }
+    
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPurchaseDate);
+      } else {
+        initPurchaseDate();
+      }
+    })();
+    </script>
+    
     <script src="/scripts/indexbundle.js"></script>
     <script src="/scripts/local-override.js" defer></script>
+
+    <script>
+        (async function(){
+          if (!document.getElementById('hcaptcha-container')) {
+            console.warn('No #hcaptcha-container on page — add container in HTML.');
+            return;
+          }
+          // Remove any existing hCaptcha scripts to avoid duplicates
+          document.querySelectorAll('script[src*="hcaptcha"]').forEach(s => s.remove());
+        
+          // Set global callback for explicit render
+          window.__hcaptchaOnLoad = function(){ console.log('hcaptcha global onload called'); };
+        
+          // Inject explicit-mode script
+          const s = document.createElement('script');
+          s.src = 'https://js.hcaptcha.com/1/api.js?onload=__hcaptchaOnLoad&render=explicit';
+          s.async = true;
+          s.defer = true;
+          document.head.appendChild(s);
+        
+          // Wait briefly for the script to load
+          await new Promise(r => setTimeout(r, 1500));
+        
+          if (!window.hcaptcha) {
+            console.warn('window.hcaptcha not found after load');
+            return;
+          }
+        
+          try {
+            const sitekey = document.getElementById('hcaptcha-container').dataset.sitekey;
+            const id = window.hcaptcha.render('hcaptcha-container', {
+              sitekey: sitekey || '',
+              size: 'compact'
+            });
+            console.log('hCaptcha rendered id=', id);
+          } catch (err) {
+            console.error('hcaptcha render error', err);
+          }
+        })();
+        </script>
+        
 
 </body>
 </html>

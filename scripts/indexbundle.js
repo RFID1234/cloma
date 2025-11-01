@@ -145,7 +145,9 @@
                         }
       
                         // Build the candidate guilloche URL (server takes precedence)
-                        var candidateG = (resp && resp.guillocheUrl) ? resp.guillocheUrl : (R2_BASE + '/images/guilloche_' + encodeURIComponent((resp && resp.code) || '') + '.png');
+                        // use proxy endpoint (same origin) so HEAD/GET won't be blocked by CORS
+                        var candidateG = '/api/guilloche?code=' + encodeURIComponent((resp && resp.code) || '');
+
       
                         // Build both HTML fragments as strings (so we can decide after checking image)
                         var counterfeitHtml = `<input id="ResultCode" name="ResultCode" type="hidden" value="${resp && resp.code}" />
