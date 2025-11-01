@@ -36,20 +36,52 @@
         }
     }
     
-    $("#btnSubmitContact").off('click').on('click', function(e) {
-        e.preventDefault();
-        // optional: validate client-side before showing the success UI
-        if ($("#contactForm").valid && $("#contactForm").valid()) {
-            $("#contactFormContainer").hide();
-            $("#contactFormFailure").hide();
-            $("#contactFormSuccess").fadeIn();
-        } else {
-            $("#contactFormContainer").hide();
-            $("#contactFormFailure").hide();
-            $("#contactFormSuccess").fadeIn();
-        }
-      });
+    function bindContactForm() {
+        // UI-only contact: do NOT send network request in production (serverless requirement)
+        $("#contactFormSuccess").hide();
+        $("#contactFormContainer").show();
       
+        // Prevent native form submission so it never posts to /CL669/SendMoreInfo
+        // but DO NOT `return false` — that breaks button click behaviour in some browsers.
+        $("#contactForm").off('submit').on('submit', function(e) {
+          e.preventDefault();
+        });
+      
+        var n = getCultureForDatepicker();
+        try {
+          $("#PurchaseDate").datepicker({ language: n, autoclose: true, format: 'mm/dd/yyyy' });
+        } catch (ex) {
+          console.warn('datepicker init failed', ex);
+        }
+      
+        // Make submit button behave like original site but skip POST
+        $("#btnSubmitContact")
+        .attr('type', 'button')
+        .off('click')
+        .on('click', function (e) {
+        e.preventDefault();
+
+        var $form = $("#contactForm");
+        var valid = true;
+
+        try {
+            valid = ($form.valid && $form.valid()) ? true : false;
+        } catch (ex) {
+            valid = true; // if validator missing, still show success
+        }
+
+        if (valid) {
+            console.log("Simulating successful contact form submit (UI only)");
+            // Simulate the success animation from original site
+            $("#contactFormContainer").fadeOut(300, function () {
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").fadeIn(400);
+            });
+        } else {
+            console.warn("Form invalid — skipping fake submit");
+        }
+        });
+      }
       
     function bindCarousels() {
       var n = $(".gfecarousel");
