@@ -125,93 +125,108 @@
       }, fadeTime);
   
       // call serverless verify on Vercel
-      $.ajax({
-          url: '/api/verify',
-          type: 'POST',
-          contentType: 'application/json',
-          data: JSON.stringify({ code: model.Code }),
-          success: function(resp) {
-              setTimeout(function() {
-                  $("#authloader").fadeOut(fadeTime);
-  
-                  if (resp && resp.status === 'counterfeit') {
-                      $("#authresponse").html(
-  `<input id="ResultCode" name="ResultCode" type="hidden" value="${resp.code}" />
-  <div class="container">
-    <div class="row">
-      <div id="authoutcome" data-result="invalid" data-product="${resp.productName || 'Cloma Product'}">
-        <div class="col-xs-12">
-          <h2 class="page-header text-center margin-top-20">Result for '${resp.code}'</h2>
-          <h2 class="text-center" style="color:#000000"><strong>You have a suspect counterfeit product</strong></h2>
-          <p style="text-align: center"><strong><span style="font-size: 22px">Please return it to where you purchased and '<a href="mailto:info@clomapharma.com">CONTACT US</a>' for further assistance if needed</span></strong></p>
-        </div>
-      </div>
-    </div>
-  </div>`
-                      );
-                  } else {
-                      // build guilloche url: prefer server return, else construct from public R2
-                      var g = (resp && resp.guillocheUrl) ? resp.guillocheUrl : (R2_BASE + '/images/guilloche_' + encodeURIComponent(resp.code) + '.png');
-  
-                      // inject success fragment with robust fallback on image error
-                      $("#authresponse").html(
-  `<input id="ResultCode" name="ResultCode" type="hidden" value="${resp.code}"/>
-  <div class="container">
-    <div class="row">
-      <div id="authoutcome" class="validcontainer" data-result="valid" data-product="${resp.productName || 'Cloma Product'}">
-        <div class="col-xs-12">
-          <h2 class="page-header text-center margin-top-20">Result for '${resp.code}'</h2>
-          <h2 class="text-center" style="color:#296829"><i class="fa fa-check"></i></h2>
-          <h2 class="text-center" style="color:#296829" id="ValidTitle"><strong>Congratulations! Your Cloma product is authentic</strong></h2>
-          <p>Thank you for your purchase of a genuine Cloma product.</p>
-          <hr/>
-          <div class="col-md-6">
-            <h2 class="page-header text-center"><span>Guilloche Response Page</span></h2>
-            <p>Your product has been verified</p>
+            // call serverless verify on Vercel
+            $.ajax({
+                url: '/api/verify',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ code: model.Code }),
+                success: function(resp) {
+                    setTimeout(function() {
+                        $("#authloader").fadeOut(fadeTime);
+      
+                        // helper: check guilloche exists (HEAD)
+                        function guillocheExists(url) {
+                          try {
+                            return fetch(url, { method: 'HEAD' }).then(function(r){
+                              return r.ok && ( (r.headers.get('content-type')||'').startsWith('image') );
+                            }).catch(function(){ return false; });
+                          } catch (e) { return Promise.resolve(false); }
+                        }
+      
+                        // Build the candidate guilloche URL (server takes precedence)
+                        var candidateG = (resp && resp.guillocheUrl) ? resp.guillocheUrl : (R2_BASE + '/images/guilloche_' + encodeURIComponent((resp && resp.code) || '') + '.png');
+      
+                        // Build both HTML fragments as strings (so we can decide after checking image)
+                        var counterfeitHtml = `<input id="ResultCode" name="ResultCode" type="hidden" value="${resp && resp.code}" />
+        <div class="container">
+          <div class="row">
+            <div id="authoutcome" data-result="invalid" data-product="${resp && (resp.productName || 'Cloma Product')}">
+              <div class="col-xs-12">
+                <h2 class="page-header text-center margin-top-20">Result for '${resp && resp.code}'</h2>
+                <h2 class="text-center" style="color:#000000"><strong>You have a suspect counterfeit product</strong></h2>
+                <p style="text-align: center"><strong><span style="font-size: 22px">Please return it to where you purchased and '<a href="mailto:info@clomapharma.com">CONTACT US</a>' for further assistance if needed</span></strong></p>
+              </div>
+            </div>
           </div>
-          <div class="col-md-6 padding-10">
-            <img src="${g}"
-                 onerror="this.onerror=null; this.src='/assets/guilloche/placeholder.png';"
-                 class="img-responsive centre"
-                 alt="Guilloche"
-                 style="max-width:100%;">
+        </div>`;
+      
+                        var successHtml = `<input id="ResultCode" name="ResultCode" type="hidden" value="${resp && resp.code}"/>
+        <div class="container">
+          <div class="row">
+            <div id="authoutcome" class="validcontainer" data-result="valid" data-product="${resp && (resp.productName || 'Cloma Product')}">
+              <div class="col-xs-12">
+                <h2 class="page-header text-center margin-top-20">Result for '${resp && resp.code}'</h2>
+                <h2 class="text-center" style="color:#296829"><i class="fa fa-check"></i></h2>
+                <h2 class="text-center" style="color:#296829" id="ValidTitle"><strong>Congratulations! Your Cloma product is authentic</strong></h2>
+                <p>Thank you for your purchase of a genuine Cloma product.</p>
+                <hr/>
+                <div class="col-md-6">
+                  <h2 class="page-header text-center"><span>Guilloche Response Page</span></h2>
+                  <p>Your product has been verified</p>
+                </div>
+                <div class="col-md-6 padding-10">
+                  <img src="${candidateG}"
+                       onerror="this.onerror=null; this.src='/assets/guilloche/placeholder.png';"
+                       class="img-responsive centre"
+                       alt="Guilloche"
+                       style="max-width:100%;">
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-    </div>
-  </div>`
-                      );
-                  }
-  
-                  // show outcome and run existing post-success logic (copied from original)
-                  $("#authoutcome").fadeIn(fadeTime);
-                  var i = $("#authoutcome").data("result"),
-                      u = $("#authoutcome").data("product"),
-                      f = $("#contactformarea").data("showinfochoice"),
-                      r = false;
-                  r = f == "ShowOnFakeAndInvalidResponse" ? (i === "counterfeit" || i === "invalid") : true;
-                  r && $("#reportLink").fadeIn(fadeTime);
-                  setupUtilitiesVisibility(u, i);
-                  fixView();
-                  if (codepresent) {
-                      window.setTimeout(function() {
-                          $("#authform").remove();
-                          $(".authbutton").remove();
-                      }, fadeTime);
-                  } else {
-                      $("#Code").val("");
-                  }
-                  if (typeof runTNT == "function") runTNT(model);
-              }, spinnerDelay);
-          },
-          error: function(err) {
-              if (err && err.status === 403) {
-                  $("#authresponse").html("<div class='alert alert-danger'>" + forbiddenError + "</div>");
-              } else {
-                  $("#authresponse").html("<div class='alert alert-danger'>" + generalError + "</div>");
-              }
-          }
-      });
+        </div>`;
+      
+                        // Check guilloche before choosing UI
+                        guillocheExists(candidateG).then(function(exists){
+                            if (!exists) {
+                              // treat as counterfeit if image is not present
+                              $("#authresponse").html(counterfeitHtml);
+                            } else {
+                              $("#authresponse").html(successHtml);
+                            }
+      
+                            // post-success UI ops (same for both branches)
+                            $("#authoutcome").fadeIn(fadeTime);
+                            var i = $("#authoutcome").data("result"),
+                                u = $("#authoutcome").data("product"),
+                                f = $("#contactformarea").data("showinfochoice"),
+                                r = false;
+                            r = f == "ShowOnFakeAndInvalidResponse" ? (i === "counterfeit" || i === "invalid") : true;
+                            r && $("#reportLink").fadeIn(fadeTime);
+                            setupUtilitiesVisibility(u, i);
+                            fixView();
+                            if (codepresent) {
+                                window.setTimeout(function() {
+                                    $("#authform").remove();
+                                    $(".authbutton").remove();
+                                }, fadeTime);
+                            } else {
+                                $("#Code").val("");
+                            }
+                            if (typeof runTNT == "function") runTNT(model);
+                        });
+                    }, spinnerDelay);
+                },
+                error: function(err) {
+                    if (err && err.status === 403) {
+                        $("#authresponse").html("<div class='alert alert-danger'>" + forbiddenError + "</div>");
+                    } else {
+                        $("#authresponse").html("<div class='alert alert-danger'>" + generalError + "</div>");
+                    }
+                }
+            });
+      
     }
   
     function fixView() {

@@ -79,17 +79,41 @@
       resp.innerHTML = '<div class="inpageloader"><img src="/assets/img/spinner.svg" alt="Loading..." class="preloader__spinner"><h2 class="page-header text-center">Checking your product</h2></div>';
     }
   
-    function showResponseFragment(json) {
-      const resp = document.querySelector('#authresponse');
-      if (!resp) return;
-      if (!json) {
-        resp.innerHTML = '<div class="alert alert-warning">Something went wrong.</div>';
-        return;
+    async function guillocheExists(url) {
+        try {
+          const r = await fetch(url, { method: 'HEAD' });
+          return r.ok && ((r.headers.get('content-type') || '').startsWith('image'));
+        } catch (e) {
+          return false;
+        }
       }
-      if (json.status === 'counterfeit') resp.innerHTML = buildCounterfeitHTML(json.code || json.c || '');
-      else resp.innerHTML = buildAuthenticHTML(json.code || json.c || '', json.guillocheUrl);
-      resp.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
+  
+      async function showResponseFragment(json) {
+        const resp = document.querySelector('#authresponse');
+        if (!resp) return;
+        if (!json) {
+          resp.innerHTML = '<div class="alert alert-warning">Something went wrong.</div>';
+          return;
+        }
+  
+        if (json.status === 'counterfeit') {
+          resp.innerHTML = buildCounterfeitHTML(json.code || json.c || '');
+          resp.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+  
+        // json.status === 'valid' -> check if guilloche image exists
+        const gUrl = json.guillocheUrl || (R2_BASE + '/images/guilloche_' + encodeURIComponent(json.code || '') + '.png');
+        const exists = await guillocheExists(gUrl);
+        if (!exists) {
+          // treat as counterfeit when no guilloche available
+          resp.innerHTML = buildCounterfeitHTML(json.code || json.c || '');
+        } else {
+          resp.innerHTML = buildAuthenticHTML(json.code || json.c || '', gUrl);
+        }
+        resp.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+  
 
     async function callVerify(code) {
         try {
@@ -121,6 +145,43 @@
     } else {
       init();
     }
+
+    // Defensive: ensure #btnReportLink shows contact area and lazy-loads hcaptcha
+document.addEventListener('DOMContentLoaded', function(){
+    var btn = document.getElementById('btnReportLink');
+    if (!btn) return;
+    // if jQuery event already attached, don't override
+    try {
+      var hasJq = window.jQuery && $._data && $._data(btn, 'events') && $._data(btn, 'events').click;
+      if (hasJq) return;
+    } catch (e) { /* ignore */ }
+  
+    btn.addEventListener('click', function(e){
+      e.preventDefault();
+      function showContact() {
+        // use jQuery fade if available, fallback to style
+        if (window.jQuery) {
+          $('#contactformarea').fadeIn(fadeTime, function(){
+            $('html, body').animate({ scrollTop: parseInt($('#section_contact').offset().top) - 80 }, fadeTime);
+            if (typeof bindContactForm === 'function') bindContactForm();
+            $('#reportLink').hide();
+          });
+        } else {
+          document.getElementById('contactformarea').style.display = 'block';
+          window.scrollTo({ top: document.getElementById('section_contact').offsetTop - 80, behavior: 'smooth' });
+          if (typeof bindContactForm === 'function') bindContactForm();
+          document.getElementById('reportLink').style.display = 'none';
+        }
+      }
+  
+      if (typeof window.ensureHcaptcha === 'function') {
+        window.ensureHcaptcha().then(function(){ showContact(); }).catch(function(){ showContact(); });
+      } else {
+        showContact();
+      }
+    });
+  });
+  
   
     // Expose a few helpers to the console for debugging after deploy
     window.__localOverrideHelpers = {
