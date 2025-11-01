@@ -1,25 +1,82 @@
 // api/verify.js
-// Robust Upstash increment + helpful debug/logging
+// Robust Upstash INCR with fallbacks + debug logging
 const THRESHOLD = 10; // >10 => counterfeit
 const R2_BASE = process.env.R2_PUBLIC_BASE || 'https://pub-4b0242a2a98f47a8b66fb0db20036b90.r2.dev';
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-// Use global fetch if available otherwise try require
+// choose fetch (Node 18+ on Vercel provides global fetch)
 let _fetch = (typeof fetch !== 'undefined') ? fetch : null;
 if (!_fetch) {
-  try { _fetch = require('node-fetch'); } catch (e) { /* will error if used */ }
+  try { _fetch = require('node-fetch'); } catch (e) { /* will error later if used */ }
 }
 
-function safeNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
+async function tryUpstashIncr(key) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN || !_fetch) {
+    console.warn('Upstash not configured or fetch missing', { UPSTASH_URL: !!UPSTASH_URL, UPSTASH_TOKEN: !!UPSTASH_TOKEN, hasFetch: !!_fetch });
+    return { ok: false, reason: 'not_configured' };
+  }
+
+  const payload = { cmd: ["INCR", key] };
+  const candidateUrls = [
+    UPSTASH_URL,
+    // common fallbacks — harmless to try if original fails
+    (UPSTASH_URL.endsWith('/') ? UPSTASH_URL.slice(0, -1) : UPSTASH_URL) + '/redis',
+    (UPSTASH_URL.endsWith('/') ? UPSTASH_URL.slice(0, -1) : UPSTASH_URL) + '/commands'
+  ];
+
+  for (let url of candidateUrls) {
+    try {
+      console.log('Upstash try', url);
+      const upRes = await _fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${UPSTASH_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+        // allow CORS / no-cache by default — server-side call
+      });
+
+      const text = await upRes.text().catch(() => null);
+      let upJson = null;
+      try { upJson = text ? JSON.parse(text) : null; } catch (e) { /* not JSON */ }
+
+      console.log('Upstash response', { url, status: upRes.status, ok: upRes.ok, text: text ? (text.length>200? text.slice(0,200)+'...' : text) : null, parsed: !!upJson });
+
+      if (!upRes.ok) {
+        // try next candidate
+        continue;
+      }
+
+      // Try to extract numeric result from common shapes
+      if (upJson != null) {
+        if (typeof upJson === 'number') return { ok: true, count: Number(upJson) };
+        if (Array.isArray(upJson) && upJson.length > 0 && !isNaN(Number(upJson[0]))) return { ok: true, count: Number(upJson[0]) };
+        if (typeof upJson.result !== 'undefined' && !isNaN(Number(upJson.result))) return { ok: true, count: Number(upJson.result) };
+        // some Upstash responses wrap result inside other keys
+        if (typeof upJson?.body !== 'undefined' && !isNaN(Number(upJson.body))) return { ok: true, count: Number(upJson.body) };
+      } else if (text && !isNaN(Number(text))) {
+        return { ok: true, count: Number(text) };
+      }
+
+      // If we reach here but status ok, try to coerce any numeric in the text
+      const maybeNum = text && text.match && text.match(/-?\d+/);
+      if (maybeNum && maybeNum.length) return { ok: true, count: Number(maybeNum[0]) };
+
+      // If ok but couldn't parse, return failure so we fallback
+      console.warn('Upstash ok but could not parse count', { url, text });
+      return { ok: false, reason: 'unparseable', text };
+    } catch (e) {
+      console.error('Upstash fetch error for', url, e && e.message || e);
+      // try next
+    }
+  }
+
+  return { ok: false, reason: 'all_attempts_failed' };
 }
 
 module.exports = async (req, res) => {
-  // ensure no caching
-  res.setHeader('Cache-Control', 'no-store, max-age=0');
-
   try {
     if (req.method !== 'POST') {
       res.setHeader('Allow', 'POST');
@@ -30,95 +87,44 @@ module.exports = async (req, res) => {
     const code = (body.code || body.c || '').toString().trim();
     if (!code) return res.status(400).json({ error: 'Missing code' });
 
-    const key = `count:${code}`;
     let count = 0;
-    let upstashOk = false;
-    let upstashDebug = { tried: [], ok: false, response: null };
+    let upstashError = false;
+    let upstashDebug = null;
 
     if (UPSTASH_URL && UPSTASH_TOKEN && _fetch) {
-      // 1) First try canonical Upstash REST: POST to UPSTASH_URL with { cmd: ["INCR", key] }
       try {
-        const cmdBody = { cmd: ["INCR", key] };
-        upstashDebug.tried.push({ method: 'POST-cmd', url: UPSTASH_URL, body: cmdBody });
-        const r = await _fetch(UPSTASH_URL, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${UPSTASH_TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(cmdBody),
-        });
-
-        const text = await r.text();
-        let parsed = null;
-        try { parsed = JSON.parse(text); } catch (e) { parsed = text; }
-        upstashDebug.response = { status: r.status, ok: r.ok, text: text, parsed };
-
-        if (r.ok) {
-          // typical shapes: { result: 3 } or [3] or 3
-          const maybe = parsed && (parsed.result || parsed[0] || parsed);
-          count = safeNum(maybe);
-          upstashOk = true;
+        const key = `count:${code}`;
+        const result = await tryUpstashIncr(key);
+        upstashDebug = result;
+        if (result && result.ok && typeof result.count !== 'undefined') {
+          count = Number(result.count);
+        } else {
+          upstashError = true;
         }
       } catch (e) {
-        upstashDebug.response = { error: String(e) };
-      }
-
-      // 2) Fallback: if first attempt failed, try PUT/POST to an /incr/<key> style endpoint (some users have urls ending with /redis or base)
-      if (!upstashOk) {
-        try {
-          const raw = UPSTASH_URL.replace(/\/+$/, '');
-          const tryUrl = `${raw}/incr/${encodeURIComponent(key)}`;
-          upstashDebug.tried.push({ method: 'POST-incr', url: tryUrl });
-          const r2 = await _fetch(tryUrl, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${UPSTASH_TOKEN}`,
-              'Content-Type': 'application/json'
-            },
-            // some Upstash implementations accept empty body for incr
-            body: JSON.stringify({})
-          });
-          const text2 = await r2.text();
-          let parsed2 = null;
-          try { parsed2 = JSON.parse(text2); } catch(e){ parsed2 = text2; }
-          upstashDebug.response2 = { status: r2.status, ok: r2.ok, text: text2, parsed: parsed2 };
-
-          if (r2.ok) {
-            const maybe = parsed2 && (parsed2.result || parsed2[0] || parsed2);
-            count = safeNum(maybe);
-            upstashOk = true;
-          }
-        } catch (e) {
-          upstashDebug.response2 = { error: String(e) };
-        }
+        console.error('Upstash call exception', e);
+        upstashError = true;
       }
     } else {
-      upstashDebug = { error: 'UPSTASH env missing', UPSTASH_URL: !!UPSTASH_URL, UPSTASH_TOKEN: !!UPSTASH_TOKEN };
+      upstashError = true;
     }
 
-    // If still not ok, count stays 0 but we surface debug to logs (do NOT leak token)
-    if (!upstashOk) {
-      console.warn('Upstash not incremented', Object.assign({}, upstashDebug, { UPSTASH_URL_BAD: !!UPSTASH_URL }));
-      // Do not return token in response. Return info that helps debug at deploy logs.
-    }
+    if (upstashError) count = 0;
 
     const status = (count > THRESHOLD) ? 'counterfeit' : 'valid';
     const guillocheUrl = `${R2_BASE.replace(/\/$/, '')}/images/guilloche_${encodeURIComponent(code)}.png`;
     const productName = 'Cloma Product';
 
-    // return helpful payload (keep it simple)
-    return res.status(200).json({
-      code,
-      count,
-      threshold: THRESHOLD,
-      status,
-      productName,
-      guillocheUrl,
-      _debug_upstash: upstashOk ? 'ok' : 'failed' // tiny hint – no secrets
-    });
+    // Helpful debug info appears in Vercel logs — safe to return minimal info to client
+    const responsePayload = { code, count, threshold: THRESHOLD, status, productName, guillocheUrl };
+    // include debug only when explicitly asked, not by default (avoid leaking tokens)
+    if (req.headers['x-debug-upstash'] === '1') {
+      responsePayload._debug = { upstashConfig: { UPSTASH_URL: !!UPSTASH_URL, UPSTASH_TOKEN: !!UPSTASH_TOKEN }, upstashDebug };
+    }
+
+    return res.status(200).json(responsePayload);
   } catch (err) {
-    console.error('verify handler error', err);
+    console.error('verify handler error', err && (err.stack || err.message || err));
     return res.status(500).json({ error: 'Server error' });
   }
 };

@@ -40,6 +40,13 @@
       // UI-only contact: do NOT send network request in production (serverless requirement)
       $("#contactFormSuccess").hide();
       $("#contactFormContainer").show();
+
+        // defensive: block native form submission so it never posts to /CL669/SendMoreInfo
+        $("#contactForm").off('submit').on('submit', function(e) {
+            e.preventDefault();
+            return false;
+        });
+    
       var n = getCultureForDatepicker();
       $("#PurchaseDate").datepicker({ language: n });
   
