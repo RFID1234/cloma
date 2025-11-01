@@ -36,7 +36,7 @@
         }
     }
     
-    f$("#btnSubmitContact").off('click').on('click', function(e) {
+    $("#btnSubmitContact").off('click').on('click', function(e) {
         e.preventDefault();
         // optional: validate client-side before showing the success UI
         if ($("#contactForm").valid && $("#contactForm").valid()) {
