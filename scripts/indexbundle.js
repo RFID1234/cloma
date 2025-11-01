@@ -37,35 +37,47 @@
     }
     
     function bindContactForm() {
-      // UI-only contact: do NOT send network request in production (serverless requirement)
-      $("#contactFormSuccess").hide();
-      $("#contactFormContainer").show();
-
-        // defensive: block native form submission so it never posts to /CL669/SendMoreInfo
+        // Reset UI each time
+        $("#contactFormSuccess").hide();
+        $("#contactFormContainer").show();
+      
+        // Prevent native form submission so it never posts to /CL669/SendMoreInfo
         $("#contactForm").off('submit').on('submit', function(e) {
-            e.preventDefault();
-            return false;
+          e.preventDefault(); // just stop native submit
+          // no return false here — that breaks button click behavior
         });
-    
-      var n = getCultureForDatepicker();
-      $("#PurchaseDate").datepicker({ language: n });
-  
-      $("#btnSubmitContact").off('click').on('click', function(e) {
-        e.preventDefault();
-        if ($("#contactForm").valid && $("#contactForm").valid()) {
-            // hide container and show success message only; do not POST to server (serverless)
-            $("#contactFormContainer").hide();
-            $("#contactFormFailure").hide();
-            $("#contactFormSuccess").fadeIn();
-        } else {
-            // show validation errors or still show success if you prefer
-            $("#contactFormContainer").hide();
-            $("#contactFormFailure").hide();
-            $("#contactFormSuccess").fadeIn();
+      
+        // Initialize datepicker safely
+        var n = getCultureForDatepicker();
+        try {
+          $("#PurchaseDate").datepicker({ autoclose: true, format: 'mm/dd/yyyy', language: n });
+        } catch (ex) {
+          console.warn('datepicker init failed', ex);
         }
-    });
-    
-    }
+      
+        // Keep the button clickable and only show success UI (no POST)
+        $("#btnSubmitContact").attr('type', 'button').off('click').on('click', function (e) {
+          e.preventDefault();
+      
+          var valid = true;
+          try {
+            valid = ($("#contactForm").valid && $("#contactForm").valid()) ? true : false;
+          } catch (ex) {
+            valid = true;
+          }
+      
+          if (valid) {
+            $("#contactFormContainer").hide();
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").fadeIn();
+          } else {
+            $("#contactFormContainer").hide();
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").fadeIn();
+          }
+        });
+      }
+      
     function bindCarousels() {
       var n = $(".gfecarousel");
       n.carousel("cycle")
