@@ -76,104 +76,100 @@
       
     
       function bindContactForm() {
-        // UI-only contact: do NOT send network request (serverless requirement)
+        // UI-only contact: do NOT send network request
         $("#contactFormSuccess").hide();
         $("#contactFormContainer").show();
       
-        // Defensive: prevent native form submit (prevents accidental POST).
-        $("#contactForm").off('submit').on('submit', function(e) { e.preventDefault(); });
+        // Defensive: prevent native form submit (no return false)
+        $("#contactForm").off('submit').on('submit', function (e) { e.preventDefault(); });
       
-        // init datepicker safely
+        // datepicker safe init
         var n = getCultureForDatepicker();
         try { $("#PurchaseDate").datepicker({ language: n, autoclose: true, format: 'mm/dd/yyyy' }); } catch (ex) { console.warn('datepicker init failed', ex); }
       
         var $form = $("#contactForm");
       
-        // Ensure submit button doesn't trigger native submit
-        $("#btnSubmitContact").attr('type','button');
+        // ensure submit is non-submitting button
+        $("#btnSubmitContact").attr('type', 'button');
       
-        // Add a hidden field that will be used to track hcaptcha response for validator
+        // add hidden field to reflect captcha status for validation
         if ($("#hcaptcha-response-hidden").length === 0) {
-          $('<input>').attr({type: 'hidden', id: 'hcaptcha-response-hidden', name: 'hcaptcha-response-hidden', value: ''})
+          $("<input>")
+            .attr({ type: "hidden", id: "hcaptcha-response-hidden", name: "hcaptcha-response-hidden", value: "" })
             .appendTo($form);
         }
       
-        // Ensure jQuery Validate exists (sitebundle typically provides it)
-        var validator = null;
-        if ($.fn && typeof $.fn.validate === 'function') {
-          try {
-            // If form already had unobtrusive validation, calling validate() returns validator instance
+        // Obtain validator instance robustly (supports both unobtrusive and manual setups)
+        var validator = $form.data('validator') || null;
+        try {
+          if (!validator && $.fn && typeof $.fn.validate === 'function') {
             validator = $form.validate();
-          } catch (e) {
-            console.warn('validate() initialization warning', e);
+            // store in data so next time $form.data('validator') will return it
+            $form.data('validator', validator);
           }
+        } catch (ex) {
+          console.warn('validator init exception', ex);
+          validator = $form.data('validator') || null;
         }
       
-        // Add required rules (useful when original HTML lacks data-val-required for some fields)
+        // Add/ensure rules for required fields (in case markup lacks data-val-required)
         try {
           if (validator) {
-            // tidy: remove pre-existing rules before adding to avoid duplicates
-            $("#RetailerName").rules && $("#RetailerName").rules('remove');
-            $("#RetailerLocation").rules && $("#RetailerLocation").rules('remove');
-            $("#PurchaseDate").rules && $("#PurchaseDate").rules('remove');
-            $("#Product").rules && $("#Product").rules('remove');
-            $("#CustomerEmail").rules && $("#CustomerEmail").rules('remove');
-            $("#hcaptcha-response-hidden").rules && $("#hcaptcha-response-hidden").rules('remove');
+            // remove previous rules to avoid duplicates
+            try { $("#RetailerName").rules('remove'); } catch (e) {}
+            try { $("#RetailerLocation").rules('remove'); } catch (e) {}
+            try { $("#PurchaseDate").rules('remove'); } catch (e) {}
+            try { $("#Product").rules('remove'); } catch (e) {}
+            try { $("#CustomerEmail").rules('remove'); } catch (e) {}
+            try { $("#hcaptcha-response-hidden").rules('remove'); } catch (e) {}
       
             $("#RetailerName").rules('add', { required: true, messages: { required: "You must tell us whom you bought the product from." }});
             $("#RetailerLocation").rules('add', { required: true, messages: { required: "You must tell us where you bought the product." }});
             $("#PurchaseDate").rules('add', { required: true, messages: { required: "You must tell us when you bought the product." }});
             $("#Product").rules('add', { required: true, messages: { required: "You must tell us what it was that you bought." }});
             $("#CustomerEmail").rules('add', { required: true, email: true, messages: { required: "Email is required", email: "Email is not valid" }});
-            // make hidden captcha field required — message will be shown in #captchaError span (we also show/hide it manually)
             $("#hcaptcha-response-hidden").rules('add', { required: true, messages: { required: "This information is required. Please provide." }});
           }
-        } catch (e) { console.warn('rules() add failed', e); }
+        } catch (e) { console.warn('adding rules failed', e); }
       
-        // Live validation: validate the field on input/change so messages appear as the user types
+        // Live validation: validate field as user types or blurs
         try {
           $form.find('input,textarea,select').on('input change blur', function () {
-            if (validator && $(this).length) {
-              try { validator.element(this); } catch (err) { /* ignore */ }
+            if (validator) {
+              try { validator.element(this); } catch (e) {}
             }
           });
-        } catch (e) { /* ignore */ }
+        } catch (e) {}
       
-        // Watch hcaptcha: set #hcaptcha-response-hidden as soon as we detect a response.
-        // This uses multiple detection mechanisms:
-        // - if window.hcaptcha exists and we can get widget id, use hcaptcha.getResponse(widgetId)
-        // - else, fallback to checking iframe textarea/attributes created by hcaptcha
+        // hCaptcha watcher: poll and update hidden input and validator properly
         (function watchHcaptcha() {
-          var checkInterval = null;
           var tries = 0;
-          function checkOnce() {
+          var interval = setInterval(function () {
             tries++;
-            var resp = '';
+            var resp = "";
+      
             try {
-              // 1) prefer explicit widget API if available
+              // 1) If explicit API available and we stored a widget id, use it
               if (window.hcaptcha && typeof window.hcaptcha.getResponse === 'function') {
-                // try to detect widget id from render (iframe may have data-hcaptcha-widget-id)
-                var widgetId = null;
-                // if you stored the id globally when rendering, use it (e.g. window.__hcaptcha_widget)
-                if (window.__hcaptcha_widget !== undefined) widgetId = window.__hcaptcha_widget;
-                // otherwise attempt to parse iframe attr
-                var ifr = document.querySelector('#hcaptcha-container iframe');
-                if (ifr) {
-                  var w = ifr.getAttribute('data-hcaptcha-widget-id');
-                  if (w) widgetId = w;
+                // use stored global id if present
+                var wid = window.__hcaptcha_widget;
+                if (wid === undefined) {
+                  // try to read from iframe attr
+                  var ifr = document.querySelector('#hcaptcha-container iframe');
+                  if (ifr) wid = ifr.getAttribute('data-hcaptcha-widget-id') || wid;
                 }
-                if (widgetId !== null) {
-                  resp = window.hcaptcha.getResponse(widgetId) || '';
+                if (wid !== undefined && wid !== null) {
+                  try { resp = (window.hcaptcha.getResponse(wid) || "").trim(); } catch (e) {}
                 }
               }
       
-              // 2) fallback: check the standard textarea name that hcaptcha may create
+              // 2) fallback: check typical textarea names hcaptcha creates
               if (!resp) {
                 var ta = document.querySelector('textarea[name^="h-captcha-response"], textarea[name^="g-recaptcha-response"]');
-                if (ta) resp = (ta.value || '').trim();
+                if (ta) resp = (ta.value || "").trim();
               }
       
-              // 3) fallback: check iframe attribute data-hcaptcha-response (if present)
+              // 3) iframe attribute fallback
               if (!resp) {
                 var ifr2 = document.querySelector('#hcaptcha-container iframe');
                 if (ifr2) {
@@ -181,68 +177,65 @@
                   if (attr) resp = attr.trim();
                 }
               }
-            } catch (e) {
-              // ignore
-            }
+            } catch (e) { /* ignore polling exceptions */ }
       
-            // update hidden input and validator
-            if (resp && resp.length > 0) {
-              $("#hcaptcha-response-hidden").val(resp);
-              $("#captchaError").hide();
-              try { if (validator) validator.element("#hcaptcha-response-hidden"); } catch(e){}
-              // once solved, stop polling
-              clearInterval(checkInterval);
-              checkInterval = null;
-            } else {
-              // not solved yet - clear hidden input so validator can show error if user clicks submit
-              $("#hcaptcha-response-hidden").val('');
-            }
-      
-            // stop after ~60 tries (30s)
-            if (tries > 60 && checkInterval) { clearInterval(checkInterval); checkInterval = null; }
-          }
-      
-          // start polling if there's an hcaptcha container, otherwise do nothing
-          if (document.getElementById('hcaptcha-container')) {
-            checkInterval = setInterval(checkOnce, 500);
-            // also run once immediately
-            checkOnce();
-          }
+            // update hidden input and update validator display
+            try {
+              var $hidden = $("#hcaptcha-response-hidden");
+              if (resp && resp.length > 0) {
+                $hidden.val(resp);
+                // hide visible captcha error if present
+                $("#captchaError").hide();
+                if (validator) {
+                  try {
+                    // call validator.element with DOM element for reliability
+                    validator.element($hidden[0]);
+                  } catch (e) {}
+                }
+                clearInterval(interval);
+              } else {
+                // keep hidden cleared so validation will fail until user solves captcha
+                $hidden.val('');
+              }
+            } catch (e) {}
+            // stop after ~30s if nothing shows (avoid infinite polling)
+            if (tries > 60) { clearInterval(interval); }
+          }, 500);
         })();
       
-        // Final: attach click handler that runs validation + captcha check and shows success UI only if valid
+        // Final click handler: run validator + captcha check => show success UI only if all pass
         $("#btnSubmitContact").off('click').on('click', function (e) {
           e && e.preventDefault();
+          console.log('btnSubmitContact clicked (debug)');
       
-          // re-evaluate form validity
           var isValid = true;
           try {
             if ($form && $form.length && typeof $form.valid === 'function') {
+              // call .valid() to trigger showing of errors for all fields
               isValid = $form.valid();
+            } else if (validator) {
+              isValid = validator.form();
             }
           } catch (ex) {
-            console.warn('validation check failed', ex);
-            isValid = true;
+            console.warn('validation call failed', ex);
+            isValid = true; // fallback allow (but shouldn't happen)
           }
       
-          // run explicit captcha check
-          var captchaOk = true;
-          try {
-            // our hidden input is authoritative for captcha
-            if ($("#hcaptcha-response-hidden").length) {
-              captchaOk = $("#hcaptcha-response-hidden").val() && $("#hcaptcha-response-hidden").val().length > 0;
-            }
-          } catch (ex) { captchaOk = true; }
+          // captcha check via hidden input
+          var captchaOk = ($("#hcaptcha-response-hidden").val() || "").trim().length > 0;
       
           if (!isValid) {
-            console.log("Contact form validation failed — showing messages.");
+            console.log('form invalid - showing errors');
             $("#contactFormContainer").show();
             $("#contactFormFailure").hide();
             $("#contactFormSuccess").hide();
+            // ensure captcha error shows if captcha is missing
+            if (!captchaOk) $("#captchaError").show();
             return;
           }
       
           if (!captchaOk) {
+            console.log('captcha missing');
             $("#captchaError").show();
             $("#contactFormContainer").show();
             $("#contactFormFailure").hide();
@@ -250,16 +243,14 @@
             return;
           }
       
-          // All good: show success UI (no network POST)
+          // All good: simulate success UI (no network POST)
           console.log("Simulating successful contact form submit (UI only)");
           $("#contactFormContainer").fadeOut(300, function () {
             $("#contactFormFailure").hide();
             $("#contactFormSuccess").fadeIn(400);
           });
         });
-      }
-      
-        
+      }      
       
       
     function bindCarousels() {
