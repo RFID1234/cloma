@@ -142,66 +142,81 @@
         } catch (e) {}
       
         // hCaptcha watcher: poll and update hidden input and validator properly
-        (function watchHcaptcha() {
-          var tries = 0;
-          var interval = setInterval(function () {
-            tries++;
-            var resp = "";
-      
+        // hCaptcha watcher: poll and update hidden input and validator properly
+(function watchHcaptcha() {
+    var tries = 0;
+    var interval = setInterval(function () {
+      tries++;
+      var resp = "";
+  
+      try {
+        // 1) explicit hcaptcha API if available and we stored a widget id
+        if (window.hcaptcha && typeof window.hcaptcha.getResponse === 'function') {
+          var wid = window.__hcaptcha_widget;
+          if (wid === undefined) {
+            var ifr = document.querySelector('#hcaptcha-container iframe');
+            if (ifr) wid = ifr.getAttribute('data-hcaptcha-widget-id') || wid;
+          }
+          if (wid !== undefined && wid !== null) {
+            try { resp = (window.hcaptcha.getResponse(wid) || "").trim(); } catch (e) {}
+          } else {
+            try { resp = (window.hcaptcha.getResponse && window.hcaptcha.getResponse()) || ""; } catch(e) {}
+          }
+        }
+  
+        // 2) fallback: check typical textarea names created by captcha widgets
+        if (!resp) {
+          var ta = document.querySelector('textarea[name^="h-captcha-response"], textarea[name^="g-recaptcha-response"], textarea[id^="h-captcha-response-"], textarea[id^="g-recaptcha-response-"]');
+          if (ta) resp = (ta.value || "").trim();
+        }
+  
+        // 3) iframe attribute fallback
+        if (!resp) {
+          var ifr2 = document.querySelector('#hcaptcha-container iframe');
+          if (ifr2) {
+            var attr = ifr2.getAttribute('data-hcaptcha-response');
+            if (attr) resp = (attr || "").trim();
+          }
+        }
+      } catch (e) { /* ignore polling exceptions */ }
+  
+      try {
+        var $hidden = $("#hcaptcha-response-hidden");
+        if (!$hidden || $hidden.length === 0) return;
+        var validator = $form.data('validator') || null;
+  
+        if (resp && resp.length > 0) {
+          // set hidden value and update validator UI
+          $hidden.val(resp);
+          $("#captchaError").hide();
+  
+          if (validator) {
             try {
-              // 1) If explicit API available and we stored a widget id, use it
-              if (window.hcaptcha && typeof window.hcaptcha.getResponse === 'function') {
-                // use stored global id if present
-                var wid = window.__hcaptcha_widget;
-                if (wid === undefined) {
-                  // try to read from iframe attr
-                  var ifr = document.querySelector('#hcaptcha-container iframe');
-                  if (ifr) wid = ifr.getAttribute('data-hcaptcha-widget-id') || wid;
-                }
-                if (wid !== undefined && wid !== null) {
-                  try { resp = (window.hcaptcha.getResponse(wid) || "").trim(); } catch (e) {}
-                }
-              }
-      
-              // 2) fallback: check typical textarea names hcaptcha creates
-              if (!resp) {
-                var ta = document.querySelector('textarea[name^="h-captcha-response"], textarea[name^="g-recaptcha-response"]');
-                if (ta) resp = (ta.value || "").trim();
-              }
-      
-              // 3) iframe attribute fallback
-              if (!resp) {
-                var ifr2 = document.querySelector('#hcaptcha-container iframe');
-                if (ifr2) {
-                  var attr = ifr2.getAttribute('data-hcaptcha-response');
-                  if (attr) resp = attr.trim();
-                }
-              }
-            } catch (e) { /* ignore polling exceptions */ }
-      
-            // update hidden input and update validator display
-            try {
-              var $hidden = $("#hcaptcha-response-hidden");
-              if (resp && resp.length > 0) {
-                $hidden.val(resp);
-                // hide visible captcha error if present
-                $("#captchaError").hide();
-                if (validator) {
-                  try {
-                    // call validator.element with DOM element for reliability
-                    validator.element($hidden[0]);
-                  } catch (e) {}
-                }
-                clearInterval(interval);
-              } else {
-                // keep hidden cleared so validation will fail until user solves captcha
-                $hidden.val('');
-              }
-            } catch (e) {}
-            // stop after ~30s if nothing shows (avoid infinite polling)
-            if (tries > 60) { clearInterval(interval); }
-          }, 500);
-        })();
+              // make validator re-evaluate the hidden field and the whole form
+              validator.element($hidden[0]);
+              validator.form(); // refresh form error display
+            } catch (e) { console.warn('validator update failed', e); }
+          } else {
+            // if no validator instance, still ensure UI hides the captcha error
+            $("#captchaError").hide();
+          }
+  
+          // stop polling once solved
+          clearInterval(interval);
+        } else {
+          // keep hidden cleared so validation will fail until user solves captcha
+          $hidden.val('');
+          // also re-trigger validation so errors show live
+          if (validator) {
+            try { validator.element($hidden[0]); } catch(e) {}
+          }
+        }
+      } catch (e) { /* ignore */ }
+  
+      if (tries > 60) { clearInterval(interval); } // ~30s timeout
+    }, 500);
+  })();
+  
       
         // Final click handler: run validator + captcha check => show success UI only if all pass
         $("#btnSubmitContact").off('click').on('click', function (e) {
@@ -383,35 +398,70 @@
           </div>
         </div>`;
       
-                        // Check guilloche before choosing UI
-                        guillocheExists(candidateG).then(function(exists){
-                            if (!exists) {
-                              // treat as counterfeit if image is not present
-                              $("#authresponse").html(counterfeitHtml);
-                            } else {
-                              $("#authresponse").html(successHtml);
-                            }
-      
-                            // post-success UI ops (same for both branches)
-                            $("#authoutcome").fadeIn(fadeTime);
-                            var i = $("#authoutcome").data("result"),
-                                u = $("#authoutcome").data("product"),
-                                f = $("#contactformarea").data("showinfochoice"),
-                                r = false;
-                            r = f == "ShowOnFakeAndInvalidResponse" ? (i === "counterfeit" || i === "invalid") : true;
-                            r && $("#reportLink").fadeIn(fadeTime);
-                            setupUtilitiesVisibility(u, i);
-                            fixView();
-                            if (codepresent) {
-                                window.setTimeout(function() {
-                                    $("#authform").remove();
-                                    $(".authbutton").remove();
-                                }, fadeTime);
-                            } else {
-                                $("#Code").val("");
-                            }
-                            if (typeof runTNT == "function") runTNT(model);
-                        });
+                        // Prefer server status first: if API told us "counterfeit", show that UI immediately.
+// Otherwise, if API says 'valid' we still check guilloche image and use successHtml if present.
+(function decideUiByServerOrImage() {
+    try {
+      // 1) server says counterfeit -> show counterfeit UI immediately
+      if (resp && resp.status === 'counterfeit') {
+        console.log('Server verdict: counterfeit -> showing counterfeit UI');
+        $("#authresponse").html(counterfeitHtml);
+        postSuccessUiOps();
+        return;
+      }
+  
+      // 2) server explicitly told us image not found -> treat as counterfeit/invalid
+      if (resp && resp.status === 'not_found') {
+        console.log('Server verdict: not_found -> showing counterfeit UI');
+        $("#authresponse").html(counterfeitHtml);
+        postSuccessUiOps();
+        return;
+      }
+  
+      // 3) otherwise check guilloche image ourselves (conservative)
+      guillocheExists(candidateG).then(function (exists) {
+        if (!exists) {
+          console.log('Guilloche HEAD check: not found -> showing counterfeit UI');
+          $("#authresponse").html(counterfeitHtml);
+        } else {
+          console.log('Guilloche HEAD check: found -> showing success UI');
+          $("#authresponse").html(successHtml);
+        }
+        postSuccessUiOps();
+      }).catch(function (err) {
+        console.warn('Guilloche HEAD check failed, conservative fallback -> counterfeit', err);
+        $("#authresponse").html(counterfeitHtml);
+        postSuccessUiOps();
+      });
+    } catch (e) {
+      console.warn('decideUiByServerOrImage error', e);
+      $("#authresponse").html(counterfeitHtml);
+      postSuccessUiOps();
+    }
+  
+    function postSuccessUiOps() {
+      // post-success UI ops (same for both branches)
+      $("#authoutcome").fadeIn(fadeTime);
+      var i = $("#authoutcome").data("result"),
+          u = $("#authoutcome").data("product"),
+          f = $("#contactformarea").data("showinfochoice"),
+          r = false;
+      r = f == "ShowOnFakeAndInvalidResponse" ? (i === "counterfeit" || i === "invalid") : true;
+      r && $("#reportLink").fadeIn(fadeTime);
+      setupUtilitiesVisibility(u, i);
+      fixView();
+      if (codepresent) {
+          window.setTimeout(function() {
+              $("#authform").remove();
+              $(".authbutton").remove();
+          }, fadeTime);
+      } else {
+          $("#Code").val("");
+      }
+      if (typeof runTNT == "function") runTNT(model);
+    }
+  })();
+  
                     }, spinnerDelay);
                 },
                 error: function(err) {

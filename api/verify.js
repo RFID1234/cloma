@@ -164,6 +164,11 @@ module.exports = async (req, res) => {
       : "not_found";
     const productName = "Cloma Product";
 
+    // --- Defensive fallback tweaks ---
+    if (!imageExists) status = "not_found";        // force not_found if image actually isn't there
+    if (isNaN(count) || count === null) count = 0; // guarantee numeric count
+
+
     return res
       .status(200)
       .json({ code, count, threshold: THRESHOLD, status, productName, guillocheUrl });
