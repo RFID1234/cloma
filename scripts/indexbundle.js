@@ -1,6 +1,7 @@
 // scripts/indexbundle.js (production-ready)
 (function () {
     'use strict';
+    var culture
   
     // PUBLIC R2 base (public dev URL)
     var R2_BASE = 'https://pub-4b0242a2a98f47a8b66fb0db20036b90.r2.dev';
