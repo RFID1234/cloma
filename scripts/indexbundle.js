@@ -41,13 +41,6 @@
         $("#contactFormSuccess").hide();
         $("#contactFormContainer").show();
       
-        // Defensive: prevent native form submit (prevents accidental POST).
-        // This uses e.preventDefault() only (no `return false`).
-        $("#contactForm").off('submit').on('submit', function(e) {
-          e.preventDefault();
-        });
-      
-        // init datepicker safely
         var n = getCultureForDatepicker();
         try {
           $("#PurchaseDate").datepicker({ language: n, autoclose: true, format: 'mm/dd/yyyy' });
@@ -55,19 +48,19 @@
           console.warn('datepicker init failed', ex);
         }
       
-        // Make submit behave like original site but skip the network POST.
-        // Keep validation and hcaptcha checks so error messages display as before.
+        // Ensure the submit button is same type as original (submit) so jquery-validate behaves exactly as before
+        // but we prevent the actual submit inside the click handler (so no POST).
         $("#btnSubmitContact")
-          .attr('type', 'button') // ensure it doesn't trigger native submit
-          .off('click')
-          .on('click', function (e) {
-            e && e.preventDefault();
+          .attr('type', 'submit')
+          .off('click') // remove any previous handlers
+          .on('click', function (ev) {
+            ev && ev.preventDefault();
       
             var $form = $("#contactForm");
             var validatorPresent = false;
             var isValid = true;
       
-            // check jquery-validate presence and run it if available (this will show the validation messages)
+            // run jquery-validate if present — this also triggers showing the field validation messages
             try {
               if ($form && $form.length && typeof $form.valid === 'function') {
                 validatorPresent = true;
@@ -75,10 +68,10 @@
               }
             } catch (ex) {
               console.warn('validation check failed', ex);
-              isValid = true; // fallback: allow success UI if validator not present
+              isValid = true; // fallback to allow success UI if validator missing
             }
       
-            // check hCaptcha (we keep the same helper verifyCatpcha used elsewhere)
+            // check hCaptcha presence & response (same helper used elsewhere)
             var captchaOk = true;
             try {
               captchaOk = verifyCatpcha($form);
@@ -87,18 +80,17 @@
               captchaOk = true;
             }
       
+            // if validation fails: show messages and keep the form visible (do NOT progress)
             if (!isValid) {
-              // validation plugin will have shown messages - we keep the form visible
-              console.log("Contact form validation failed — showing messages.");
-              // ensure contact form container remains visible so user sees errors
+              console.log("Contact form validation failed — messages should now be visible.");
               $("#contactFormContainer").show();
               $("#contactFormFailure").hide();
               $("#contactFormSuccess").hide();
               return;
             }
       
+            // if captcha fails, show captcha error and keep form visible
             if (!captchaOk) {
-              // show captcha error like original
               $("#captchaError").show();
               $("#contactFormContainer").show();
               $("#contactFormFailure").hide();
@@ -108,14 +100,24 @@
               $("#captchaError").hide();
             }
       
-            // Simulate original successful-submit UX (no POST)
-            console.log("Simulating successful contact form submit (UI only)");
-            $("#contactFormContainer").fadeOut(300, function () {
+            // Everything valid: emulate original submit UX but do not POST.
+            // Disable the button while "processing", same UX as original site.
+            var $btn = $(this);
+            $btn.attr('disabled', 'disabled');
+      
+            console.log("Simulating successful contact form submit (UI only) — no network request will be sent.");
+      
+            // Simulate original success flow:
+            setTimeout(function () {
+              $("#contactFormContainer").hide();
               $("#contactFormFailure").hide();
-              $("#contactFormSuccess").fadeIn(400);
-            });
+              $("#contactFormSuccess").fadeIn();
+      
+              // re-enable button after showing success (so UI not permanently disabled)
+              $btn.removeAttr('disabled');
+            }, 300);
           });
-      }
+      }      
       
       
     function bindCarousels() {
