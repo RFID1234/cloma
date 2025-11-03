@@ -76,96 +76,189 @@
       
     
       function bindContactForm() {
-        // UI-only contact: do NOT send network request in production (serverless requirement)
+        // UI-only contact: do NOT send network request (serverless requirement)
         $("#contactFormSuccess").hide();
         $("#contactFormContainer").show();
-    
-        // Prevent native form submission so it never posts
-        $("#contactForm").off('submit').on('submit', function(e) {
-          e.preventDefault();
-        });
-    
+      
+        // Defensive: prevent native form submit (prevents accidental POST).
+        $("#contactForm").off('submit').on('submit', function(e) { e.preventDefault(); });
+      
         // init datepicker safely
         var n = getCultureForDatepicker();
-        try {
-          $("#PurchaseDate").datepicker({ language: n, autoclose: true, format: 'mm/dd/yyyy' });
-        } catch (ex) {
-          console.warn('datepicker init failed', ex);
+        try { $("#PurchaseDate").datepicker({ language: n, autoclose: true, format: 'mm/dd/yyyy' }); } catch (ex) { console.warn('datepicker init failed', ex); }
+      
+        var $form = $("#contactForm");
+      
+        // Ensure submit button doesn't trigger native submit
+        $("#btnSubmitContact").attr('type','button');
+      
+        // Add a hidden field that will be used to track hcaptcha response for validator
+        if ($("#hcaptcha-response-hidden").length === 0) {
+          $('<input>').attr({type: 'hidden', id: 'hcaptcha-response-hidden', name: 'hcaptcha-response-hidden', value: ''})
+            .appendTo($form);
         }
-    
-        // Make submit behave like original site but skip the network POST.
-        $("#btnSubmitContact")
-          .attr('type', 'button')
-          .off('click')
-          .on('click', function (e) {
-            e && e.preventDefault();
-    
-            var $form = $("#contactForm");
-    
-            // Ensure validator is initialised (unobtrusive might parse dynamically)
-            var validator = null;
-            try {
-              validator = $form.validate(); // initializes or returns existing validator
-            } catch (ex) {
-              console.warn('validator init failed', ex);
+      
+        // Ensure jQuery Validate exists (sitebundle typically provides it)
+        var validator = null;
+        if ($.fn && typeof $.fn.validate === 'function') {
+          try {
+            // If form already had unobtrusive validation, calling validate() returns validator instance
+            validator = $form.validate();
+          } catch (e) {
+            console.warn('validate() initialization warning', e);
+          }
+        }
+      
+        // Add required rules (useful when original HTML lacks data-val-required for some fields)
+        try {
+          if (validator) {
+            // tidy: remove pre-existing rules before adding to avoid duplicates
+            $("#RetailerName").rules && $("#RetailerName").rules('remove');
+            $("#RetailerLocation").rules && $("#RetailerLocation").rules('remove');
+            $("#PurchaseDate").rules && $("#PurchaseDate").rules('remove');
+            $("#Product").rules && $("#Product").rules('remove');
+            $("#CustomerEmail").rules && $("#CustomerEmail").rules('remove');
+            $("#hcaptcha-response-hidden").rules && $("#hcaptcha-response-hidden").rules('remove');
+      
+            $("#RetailerName").rules('add', { required: true, messages: { required: "You must tell us whom you bought the product from." }});
+            $("#RetailerLocation").rules('add', { required: true, messages: { required: "You must tell us where you bought the product." }});
+            $("#PurchaseDate").rules('add', { required: true, messages: { required: "You must tell us when you bought the product." }});
+            $("#Product").rules('add', { required: true, messages: { required: "You must tell us what it was that you bought." }});
+            $("#CustomerEmail").rules('add', { required: true, email: true, messages: { required: "Email is required", email: "Email is not valid" }});
+            // make hidden captcha field required — message will be shown in #captchaError span (we also show/hide it manually)
+            $("#hcaptcha-response-hidden").rules('add', { required: true, messages: { required: "This information is required. Please provide." }});
+          }
+        } catch (e) { console.warn('rules() add failed', e); }
+      
+        // Live validation: validate the field on input/change so messages appear as the user types
+        try {
+          $form.find('input,textarea,select').on('input change blur', function () {
+            if (validator && $(this).length) {
+              try { validator.element(this); } catch (err) { /* ignore */ }
             }
-    
-            // Force validation run and show messages
-            var isValid = true;
-            try {
-              if (validator && typeof validator.form === 'function') {
-                isValid = validator.form(); // run and show errors
-              } else if ($form && typeof $form.valid === 'function') {
-                isValid = $form.valid();
-              }
-            } catch (ex) {
-              console.warn('validation check failed', ex);
-              isValid = true; // fallback
-            }
-    
-            if (!isValid) {
-              // make sure first invalid is focused so user sees the error
-              try { validator && typeof validator.focusInvalid === 'function' && validator.focusInvalid(); } catch(e) {}
-              $("#contactFormContainer").show();
-              $("#contactFormFailure").hide();
-              $("#contactFormSuccess").hide();
-              console.log('Form invalid — validation messages should be visible.');
-              return;
-            }
-    
-            // check captcha (only pass if real response)
-            var captchaOk = true;
-            try {
-              captchaOk = verifyCatpcha($form);
-            } catch (ex) {
-              console.warn('captcha check failed', ex);
-              captchaOk = false; // be strict
-            }
-    
-            if (!captchaOk) {
-              $("#captchaError").show();
-              // focus captcha container
-              try { 
-                var hc = document.getElementById('hcaptcha-container') || document.querySelector('.h-captcha');
-                hc && hc.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              } catch(e){ }
-              $("#contactFormContainer").show();
-              $("#contactFormFailure").hide();
-              $("#contactFormSuccess").hide();
-              console.log('Captcha response missing — user must complete hCaptcha.');
-              return;
-            } else {
-              $("#captchaError").hide();
-            }
-    
-            // Simulate original successful-submit UX (no POST)
-            console.log("Simulating successful contact form submit (UI only)");
-            $("#contactFormContainer").fadeOut(300, function () {
-              $("#contactFormFailure").hide();
-              $("#contactFormSuccess").fadeIn(400);
-            });
           });
+        } catch (e) { /* ignore */ }
+      
+        // Watch hcaptcha: set #hcaptcha-response-hidden as soon as we detect a response.
+        // This uses multiple detection mechanisms:
+        // - if window.hcaptcha exists and we can get widget id, use hcaptcha.getResponse(widgetId)
+        // - else, fallback to checking iframe textarea/attributes created by hcaptcha
+        (function watchHcaptcha() {
+          var checkInterval = null;
+          var tries = 0;
+          function checkOnce() {
+            tries++;
+            var resp = '';
+            try {
+              // 1) prefer explicit widget API if available
+              if (window.hcaptcha && typeof window.hcaptcha.getResponse === 'function') {
+                // try to detect widget id from render (iframe may have data-hcaptcha-widget-id)
+                var widgetId = null;
+                // if you stored the id globally when rendering, use it (e.g. window.__hcaptcha_widget)
+                if (window.__hcaptcha_widget !== undefined) widgetId = window.__hcaptcha_widget;
+                // otherwise attempt to parse iframe attr
+                var ifr = document.querySelector('#hcaptcha-container iframe');
+                if (ifr) {
+                  var w = ifr.getAttribute('data-hcaptcha-widget-id');
+                  if (w) widgetId = w;
+                }
+                if (widgetId !== null) {
+                  resp = window.hcaptcha.getResponse(widgetId) || '';
+                }
+              }
+      
+              // 2) fallback: check the standard textarea name that hcaptcha may create
+              if (!resp) {
+                var ta = document.querySelector('textarea[name^="h-captcha-response"], textarea[name^="g-recaptcha-response"]');
+                if (ta) resp = (ta.value || '').trim();
+              }
+      
+              // 3) fallback: check iframe attribute data-hcaptcha-response (if present)
+              if (!resp) {
+                var ifr2 = document.querySelector('#hcaptcha-container iframe');
+                if (ifr2) {
+                  var attr = ifr2.getAttribute('data-hcaptcha-response');
+                  if (attr) resp = attr.trim();
+                }
+              }
+            } catch (e) {
+              // ignore
+            }
+      
+            // update hidden input and validator
+            if (resp && resp.length > 0) {
+              $("#hcaptcha-response-hidden").val(resp);
+              $("#captchaError").hide();
+              try { if (validator) validator.element("#hcaptcha-response-hidden"); } catch(e){}
+              // once solved, stop polling
+              clearInterval(checkInterval);
+              checkInterval = null;
+            } else {
+              // not solved yet - clear hidden input so validator can show error if user clicks submit
+              $("#hcaptcha-response-hidden").val('');
+            }
+      
+            // stop after ~60 tries (30s)
+            if (tries > 60 && checkInterval) { clearInterval(checkInterval); checkInterval = null; }
+          }
+      
+          // start polling if there's an hcaptcha container, otherwise do nothing
+          if (document.getElementById('hcaptcha-container')) {
+            checkInterval = setInterval(checkOnce, 500);
+            // also run once immediately
+            checkOnce();
+          }
+        })();
+      
+        // Final: attach click handler that runs validation + captcha check and shows success UI only if valid
+        $("#btnSubmitContact").off('click').on('click', function (e) {
+          e && e.preventDefault();
+      
+          // re-evaluate form validity
+          var isValid = true;
+          try {
+            if ($form && $form.length && typeof $form.valid === 'function') {
+              isValid = $form.valid();
+            }
+          } catch (ex) {
+            console.warn('validation check failed', ex);
+            isValid = true;
+          }
+      
+          // run explicit captcha check
+          var captchaOk = true;
+          try {
+            // our hidden input is authoritative for captcha
+            if ($("#hcaptcha-response-hidden").length) {
+              captchaOk = $("#hcaptcha-response-hidden").val() && $("#hcaptcha-response-hidden").val().length > 0;
+            }
+          } catch (ex) { captchaOk = true; }
+      
+          if (!isValid) {
+            console.log("Contact form validation failed — showing messages.");
+            $("#contactFormContainer").show();
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").hide();
+            return;
+          }
+      
+          if (!captchaOk) {
+            $("#captchaError").show();
+            $("#contactFormContainer").show();
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").hide();
+            return;
+          }
+      
+          // All good: show success UI (no network POST)
+          console.log("Simulating successful contact form submit (UI only)");
+          $("#contactFormContainer").fadeOut(300, function () {
+            $("#contactFormFailure").hide();
+            $("#contactFormSuccess").fadeIn(400);
+          });
+        });
       }
+      
         
       
       
